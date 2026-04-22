@@ -22,7 +22,7 @@ subdtakeover     = "external.subdomaintakeover:main"
 wcf-meta         = "external.wcf_meta_check:main"
 klist2ccache     = "internal.klist2ccache:main"
 klistremote      = "internal.klistremote:main"
-viewstate-check  = "internal.viewstate_check:main"
+viewstate-check  = "external.viewstate_check:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

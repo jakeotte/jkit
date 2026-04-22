@@ -105,25 +105,20 @@ def _try_key(vs_bytes: bytes, key_hex: str, gen_hex: str) -> tuple[bool, str]:
     return False, ""
 
 
-def _badsecrets(vs_b64: str, gen_hex: str) -> list[str] | None:
+def _badsecrets(vs_b64: str, gen_hex: str) -> dict | None:
     """
     Run badsecrets against known machine key list.
-    Returns list of result strings, or None if badsecrets is not installed.
+    Returns result dict, empty dict if no match, or None if not installed.
     """
     try:
-        from badsecrets.base import carve_all_products          # type: ignore
+        from badsecrets.base import check_all_modules            # type: ignore
     except ImportError:
         return None
 
-    results = []
-    for product in carve_all_products():
-        try:
-            r = product.check_secret(viewstate=vs_b64, generator=gen_hex)
-            if r:
-                results.append(str(r))
-        except Exception:
-            pass
-    return results
+    try:
+        return check_all_modules(vs_b64, gen_hex) or {}
+    except Exception:
+        return {}
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -190,8 +185,12 @@ def main() -> None:
     if bs_results is None:
         console.print("  [yellow]badsecrets not installed.[/yellow]  pip install badsecrets")
     elif bs_results:
-        for r in bs_results:
-            console.print(f"  [bold red][VULN][/bold red] Known key matched: {r}")
+        secret  = bs_results.get("secret", "?")
+        details = bs_results.get("details", "")
+        module  = bs_results.get("detecting_module", "")
+        console.print(f"  [bold red][VULN][/bold red] {module}: {secret}")
+        if details:
+            console.print(f"         details: {details}")
     else:
         console.print("  [green][OK][/green]  No known machine keys matched")
     console.print()
