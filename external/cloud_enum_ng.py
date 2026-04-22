@@ -191,20 +191,74 @@ ALIYUN_REGIONS = [
     "oss-ap-northeast-1","oss-eu-central-1","oss-me-east-1",
 ]
 
+# ── WILDCARD DNS DETECTION ────────────────────────────────────────────────────
+# These platform suffixes resolve ANY subdomain via DNS wildcard.
+# DNS-only detection produces massive false positives — HTTP verify required.
+_WILDCARD_DNS_SUFFIXES = frozenset({
+    "azurefd.net",
+    "devtunnels.ms",
+    "azurestaticapps.net",
+    "bitbucket.io",
+    "deno.dev",
+    "cleverapps.io",
+    "osc-fr1.scalingo.io",
+    "looker.com",
+})
+
+_NOT_FOUND_RE = re.compile(
+    r"there isn.t a github pages site here|"
+    r"no\s+deployment\s+found|"
+    r"site\s+not\s+found|"
+    r"this\s+app\s+is\s+awaiting\s+content|"
+    r"DomainNotFound|"
+    r"no\s+such\s+(?:project|app|site)|"
+    r"app\s+(?:not\s+found|not\s+deployed)|"
+    r"project\s+not\s+found|"
+    r"tunnel\s+not\s+found|"
+    r"deploy\s+not\s+found|"
+    r"no\s+backend\s+configured",
+    re.IGNORECASE
+)
+
+# ── SEVERITY ──────────────────────────────────────────────────────────────────
+_STORAGE_SVCS = frozenset({
+    "s3", "gcs", "blob", "file", "queue", "table", "dfs",
+    "spaces", "oss", "firebase-rtdb",
+})
+_SENSITIVE_SVCS = frozenset({
+    "key-vault", "kudu-scm", "container-registry", "cognito",
+    "sagemaker", "openai", "cognitive",
+})
+_DATA_SVCS = frozenset({
+    "sql-db", "cosmos-db", "redis", "opensearch", "ai-search", "looker",
+})
+_SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+def _severity(platform: str, svc: str, access: str) -> str:
+    base = svc.split(":")[0]
+    if base in _STORAGE_SVCS:
+        return "critical" if access == "public" else "high"
+    if base in _SENSITIVE_SVCS or base in _DATA_SVCS:
+        return "high"
+    if access == "public":
+        return "medium"
+    return "low"
+
 # ── RESULTS ───────────────────────────────────────────────────────────────────
 RESULTS: List[Dict] = []
 _log_fh = None
 _log_fmt = "text"
 
 def record(platform: str, service: str, target: str, access: str) -> None:
-    entry = {"platform": platform, "service": service, "target": target, "access": access}
+    sev = _severity(platform, service, access)
+    entry = {"platform": platform, "service": service, "target": target, "access": access, "severity": sev}
     RESULTS.append(entry)
     if access == "public":
         print(pub(f"{platform}/{service}: {target}"))
     else:
         print(prot(f"{platform}/{service}: {target}"))
     if _log_fh and _log_fmt == "text":
-        _log_fh.write(f"{access.upper()} | {platform}/{service} | {target}\n")
+        _log_fh.write(f"{access.upper()} | {sev.upper()} | {platform}/{service} | {target}\n")
         _log_fh.flush()
     elif _log_fh and _log_fmt == "json":
         _log_fh.write(json.dumps(entry) + "\n")
@@ -241,6 +295,19 @@ async def hget_batch(
             if result:
                 cb(url, *result)
     await asyncio.gather(*[_one(u, cb) for u, cb in items], return_exceptions=True)
+
+
+async def _http_confirm(session: aiohttp.ClientSession, url: str) -> bool:
+    """Verify a DNS hit is a real resource, not a wildcard-DNS placeholder."""
+    r = await hget(session, url)
+    if not r:
+        return False
+    status, _, body = r
+    if status == 404:
+        return False
+    if _NOT_FOUND_RE.search(body[:1000]):
+        return False
+    return True
 
 # ── DNS ───────────────────────────────────────────────────────────────────────
 def _dns_resolves(args: Tuple) -> Optional[str]:
@@ -457,7 +524,12 @@ async def check_azure(session, names, resolver, threads):
     ]:
         print(inf(f"Azure {svc} — {len(names):,} names"))
         for h in dns_bulk([f"{n}.{suffix}" for n in names], resolver, threads):
-            record("azure", svc, f"https://{h}", "public")
+            url = f"https://{h}"
+            if suffix in _WILDCARD_DNS_SUFFIXES:
+                if await _http_confirm(session, url):
+                    record("azure", svc, url, "public")
+            else:
+                record("azure", svc, url, "public")
 
     # ── Key Vault ──
     print(inf(f"Key Vault — {len(an):,} names"))
@@ -465,6 +537,7 @@ async def check_azure(session, names, resolver, threads):
         record("azure", "key-vault", f"https://{h}", "auth")
 
     # ── SQL / Cosmos / Redis / Service Bus ──
+    _auth_svcs = {"key-vault", "sql-db", "cosmos-db", "redis", "service-bus", "iot-hub"}
     for svc, suffix in [
         ("sql-db",      "database.windows.net"),
         ("cosmos-db",   "documents.azure.com"),
@@ -483,8 +556,14 @@ async def check_azure(session, names, resolver, threads):
         ("event-grid",  "eventgrid.azure.net"),
     ]:
         print(inf(f"Azure {svc} — {len(names):,} names"))
+        access = "auth" if svc in _auth_svcs else "public"
         for h in dns_bulk([f"{n}.{suffix}" for n in names], resolver, threads):
-            record("azure", svc, f"https://{h}", "auth" if svc in ("key-vault","sql-db","cosmos-db","redis","service-bus","iot-hub") else "public")
+            url = f"https://{h}"
+            if suffix in _WILDCARD_DNS_SUFFIXES:
+                if await _http_confirm(session, url):
+                    record("azure", svc, url, access)
+            else:
+                record("azure", svc, url, access)
 
     # ── Container Apps (regional) — top 8 regions ──
     print(inf(f"Container Apps — {len(names):,} × 8 regions"))
@@ -502,7 +581,9 @@ async def check_azure(session, names, resolver, threads):
     print(inf(f"Static Web Apps — {len(names):,} × 10 regions"))
     swa = [f"{n}.{r}.azurestaticapps.net" for n in names for r in AZURE_REGIONS[:10]]
     for h in dns_bulk(swa, resolver, threads):
-        record("azure", "static-web-app", f"https://{h}", "public")
+        url = f"https://{h}"
+        if await _http_confirm(session, url):
+            record("azure", "static-web-app", url, "public")
 
     # ── Managed Grafana ──
     print(inf(f"Managed Grafana — {len(names):,} × 5 regions"))
@@ -827,22 +908,42 @@ async def check_platforms(session, names, resolver, threads):
         if not ns: continue
         print(inf(f"{platform}/{svc} — {len(ns):,} names"))
         found = dns_bulk([f"{n}.{suffix}" for n in ns], resolver, threads)
+        needs_verify = suffix in _WILDCARD_DNS_SUFFIXES
         for h in found:
-            record(platform, svc, f"https://{h}", "public")
+            url = f"https://{h}"
+            if needs_verify:
+                if await _http_confirm(session, url):
+                    record(platform, svc, url, "public")
+            else:
+                record(platform, svc, url, "public")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  CERTIFICATE TRANSPARENCY
 # ══════════════════════════════════════════════════════════════════════════════
+_CT_TIMEOUT = aiohttp.ClientTimeout(total=60, connect=10)
+
 async def check_ct(session, keywords):
     banner("Certificate Transparency (crt.sh)")
     found: set = set()
     for kw in keywords:
         print(inf(f"crt.sh: {kw}"))
         url = f"https://crt.sh/?q=%25{kw}%25&output=json"
-        r = await hget(session, url)
-        if not r or r[0] != 200:
-            print(f"  {RED}[!] crt.sh request failed{RESET}")
+        r = None
+        for attempt in range(3):
+            try:
+                async with session.get(url, timeout=_CT_TIMEOUT, headers=_HEADERS, ssl=False) as resp:
+                    if resp.status == 200:
+                        r = (resp.status, {}, await resp.text(errors="replace"))
+                        break
+                    elif resp.status == 429:
+                        print(inf(f"crt.sh rate-limited, waiting 10s..."))
+                        await asyncio.sleep(10)
+            except Exception as e:
+                if attempt < 2:
+                    await asyncio.sleep(5)
+        if not r:
+            print(f"  {RED}[!] crt.sh request failed after 3 attempts{RESET}")
             continue
         try:
             data = json.loads(r[2])
@@ -971,7 +1072,7 @@ async def run(args):
 
     # ── Summary ──
     print(f"\n{BOLD}{CYAN}{'═'*64}{RESET}")
-    print(f"{BOLD}  RESULTS{RESET}")
+    print(f"{BOLD}  RESULTS — sorted by severity{RESET}")
     print(f"{BOLD}{CYAN}{'═'*64}{RESET}")
     public = [r for r in RESULTS if r["access"] == "public"]
     auth   = [r for r in RESULTS if r["access"] == "auth"]
@@ -979,22 +1080,30 @@ async def run(args):
     print(f"  {YELLOW}Auth-Required: {len(auth)}{RESET}")
     print(f"  Total found  : {len(RESULTS)}")
 
-    if public:
-        print(f"\n{GREEN}{BOLD}  PUBLIC ASSETS:{RESET}")
-        for r in public:
-            print(f"    [{r['platform']}/{r['service']}] {r['target']}")
-    if auth:
-        print(f"\n{YELLOW}{BOLD}  AUTH-PROTECTED ASSETS:{RESET}")
-        for r in auth:
-            print(f"    [{r['platform']}/{r['service']}] {r['target']}")
+    _SEV_COLOR = {
+        "critical": RED,
+        "high":     YELLOW,
+        "medium":   GREEN,
+        "low":      CYAN,
+    }
+    sorted_results = sorted(RESULTS, key=lambda r: _SEVERITY_ORDER.get(r.get("severity", "low"), 3))
+    current_sev = None
+    for r in sorted_results:
+        sev = r.get("severity", "low")
+        if sev != current_sev:
+            current_sev = sev
+            col = _SEV_COLOR.get(sev, CYAN)
+            print(f"\n{col}{BOLD}  [{sev.upper()}]{RESET}")
+        access_tag = f"{GREEN}PUBLIC{RESET}" if r["access"] == "public" else f"{YELLOW}AUTH{RESET}"
+        print(f"    [{access_tag}] [{r['platform']}/{r['service']}] {r['target']}")
 
     # ── Write output file ──
     if _log_fh:
         if args.format == "csv":
             writer = csvmod.DictWriter(_log_fh,
-                                       fieldnames=["platform","service","target","access"])
+                                       fieldnames=["severity","platform","service","target","access"])
             writer.writeheader()
-            writer.writerows(RESULTS)
+            writer.writerows(sorted(RESULTS, key=lambda r: _SEVERITY_ORDER.get(r.get("severity","low"), 3)))
         elif args.format == "json":
             json.dump(RESULTS, _log_fh, indent=2)
         _log_fh.close()

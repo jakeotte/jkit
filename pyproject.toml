@@ -20,6 +20,7 @@ emailscanner  = "emailscanner:main"
 klist2ccache  = "klist2ccache:main"
 klistremote   = "klistremote:main"
 subdtakeover  = "subdomaintakeover:main"
+wcf-meta      = "wcf_meta_check:main"
 
 [tool.setuptools]
 py-modules = [
@@ -28,4 +29,5 @@ py-modules = [
     "klist2ccache",
     "klistremote",
     "subdomaintakeover",
+    "wcf_meta_check",
 ]
