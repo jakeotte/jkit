@@ -15,19 +15,13 @@ dependencies = [
 ]
 
 [project.scripts]
-cloud-enum    = "cloud_enum_ng:main"
-emailscanner  = "emailscanner:main"
-klist2ccache  = "klist2ccache:main"
-klistremote   = "klistremote:main"
-subdtakeover  = "subdomaintakeover:main"
-wcf-meta      = "wcf_meta_check:main"
+cloud-enum    = "external.cloud_enum_ng:main"
+emailscanner  = "external.emailscanner:main"
+subdtakeover  = "external.subdomaintakeover:main"
+wcf-meta      = "external.wcf_meta_check:main"
+klist2ccache  = "internal.klist2ccache:main"
+klistremote   = "internal.klistremote:main"
 
-[tool.setuptools]
-py-modules = [
-    "cloud_enum_ng",
-    "emailscanner",
-    "klist2ccache",
-    "klistremote",
-    "subdomaintakeover",
-    "wcf_meta_check",
-]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["external*", "internal*"]
