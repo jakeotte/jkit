@@ -58,23 +58,14 @@ def _decode(vs: str) -> bytes:
     return base64.b64decode(vs)
 
 
-def _gen_modifier(gen_hex: str) -> bytes:
-    """Convert __VIEWSTATEGENERATOR hex to big-endian uint32 bytes."""
-    if not gen_hex:
-        return b""
-    return struct.pack(">I", int(gen_hex, 16))
-
-
 def _is_encrypted(data: bytes) -> bool:
     return len(data) >= 2 and data[0] == 0xFF and data[1] == 0x01
 
 
 def _detect_mac(data: bytes) -> str | None:
     """
-    Heuristic: check whether the data ends with a plausible HMAC block.
-    LOS (Limited Object Serialization) payloads end with 0x65 (end marker).
-    If byte at offset -(mac_len) == 0x65, trailing bytes are likely the MAC.
-    Returns algorithm name or None if indeterminate.
+    Heuristic: LOS payloads end with 0x65 (end marker).
+    If byte at -(mac_len+1) == 0x65, trailing bytes are likely the MAC.
     """
     for alg, (_, mac_len) in _ALGORITHMS.items():
         if len(data) > mac_len and data[-(mac_len + 1)] == 0x65:
@@ -83,13 +74,19 @@ def _detect_mac(data: bytes) -> str | None:
 
 
 def _try_key(vs_bytes: bytes, key_hex: str, gen_hex: str) -> tuple[bool, str]:
-    """Try all algorithms. Returns (matched, alg_name)."""
+    """
+    Replicate .NET 4.0 MAC computation. Returns (matched, alg_name).
+
+    .NET appends the MAC to: HMAC(validationKey, payload + generator_LE)
+    Exception: MD5 uses MD5(payload + validationKey + b"\\x00"*4) — no HMAC.
+    Generator is little-endian uint32, defaulting to 0 if not supplied.
+    """
     try:
         key = bytes.fromhex(key_hex.strip())
     except ValueError:
         return False, ""
 
-    modifier = _gen_modifier(gen_hex)
+    gen_le = struct.pack("<I", int(gen_hex or "0000", 16))
 
     for alg, (hash_fn, mac_len) in _ALGORITHMS.items():
         if len(vs_bytes) <= mac_len:
@@ -97,10 +94,13 @@ def _try_key(vs_bytes: bytes, key_hex: str, gen_hex: str) -> tuple[bool, str]:
         payload     = vs_bytes[:-mac_len]
         claimed_mac = vs_bytes[-mac_len:]
 
-        for suffix in (modifier, b""):
-            h = hmac.new(key, payload + suffix, hash_fn)
-            if hmac.compare_digest(h.digest(), claimed_mac):
-                return True, alg
+        if alg == "MD5":
+            h = hashlib.md5(payload + key + b"\x00\x00\x00\x00")
+        else:
+            h = hmac.new(key, payload + gen_le, hash_fn)
+
+        if hmac.compare_digest(h.digest(), claimed_mac):
+            return True, alg
 
     return False, ""
 
@@ -181,6 +181,8 @@ def main() -> None:
 
     # ── 3. badsecrets ─────────────────────────────────────────────────────────
     console.print(Rule("[dim]3 · Known Machine Keys (badsecrets)[/dim]"))
+    if not args.generator:
+        console.print("  [dim]No -g generator supplied — key matching may miss MAC-enabled ViewStates[/dim]")
     bs_results = _badsecrets(args.viewstate, args.generator)
     if bs_results is None:
         console.print("  [yellow]badsecrets not installed.[/yellow]  pip install badsecrets")
