@@ -1,0 +1,6 @@
+[submodule "internal/RustHound-CE"]
+	path = internal/RustHound-CE
+	url = git@github.com:jakeotte/RustHound-CE.git
+[submodule "internal/smbthief"]
+	path = internal/smbthief
+	url = git@github.com:jakeotte/smbthief.git
