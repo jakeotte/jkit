@@ -4,3 +4,6 @@
 [submodule "internal/smbthief"]
 	path = internal/smbthief
 	url = git@github.com:jakeotte/smbthief.git
+[submodule "internal/klist2ccache"]
+	path = internal/klist2ccache
+	url = git@github.com:jakeotte/klist2ccache.git
