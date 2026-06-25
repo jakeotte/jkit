@@ -700,7 +700,7 @@ def main():
         if username in enumerated or args.no_enumerate:
             return
         enumerated.add(username)
-        rprint(f"  [bold cyan][*] Searching [{username}]...[/bold cyan]")
+        rprint(f"  [bold green][*] Searching {username}...[/bold green]")
 
         # Graph token
         graph_tok = get_token_for_scope(
