@@ -412,11 +412,53 @@ def enumerate_graph(token: str, data: TenantData) -> dict:
 # Azure enumeration
 # ---------------------------------------------------------------------------
 
-def enumerate_azure(token: str, data: TenantData) -> dict:
+OWNED_TYPE_LABELS = {
+    "application":      "app",
+    "serviceprincipal": "SP",
+    "group":            "group",
+    "device":           "device",
+}
+
+
+def enumerate_owned_objects(graph_token: str) -> dict[str, list]:
+    """Return all objects owned by the authed user, keyed by friendly type."""
+    s = graph_session(graph_token)
+    owned: dict[str, list] = {}
+    try:
+        items = paginate(s, f"{GRAPH}/me/ownedObjects?$select=id,displayName,appId&$top=999")
+        for item in items:
+            raw = item.get("@odata.type", "").lower().replace("#microsoft.graph.", "")
+            label = OWNED_TYPE_LABELS.get(raw, raw) if raw else "unknown"
+            owned.setdefault(label, []).append(item)
+    except Exception:
+        pass
+    return owned
+
+
+def enumerate_user_roles(graph_token: str) -> list[str]:
+    """Return displayNames of all Entra directory roles the authed user holds."""
+    s = graph_session(graph_token)
+    roles = []
+    try:
+        items = paginate(
+            s,
+            f"{GRAPH}/me/transitiveMemberOf/microsoft.graph.directoryRole"
+            "?$select=id,displayName&$top=999",
+        )
+        roles = [r.get("displayName", r.get("id", "")) for r in items if r.get("displayName")]
+    except Exception:
+        pass
+    return sorted(roles)
+
+
+def enumerate_azure(token: str, data: TenantData) -> tuple[dict, dict]:
+    """Returns (added, found) — found is total visible to this token before dedup."""
     s = arm_session(token)
     added = defaultdict(int)
+    found = defaultdict(int)
 
     subs = paginate(s, f"{ARM}/subscriptions?api-version={ARM_API}")
+    found["subscriptions"] = len(subs)
     added["subscriptions"] = data.add_many(data.subscriptions, subs, key="subscriptionId")
 
     for sub in subs:
@@ -426,13 +468,15 @@ def enumerate_azure(token: str, data: TenantData) -> dict:
 
         # All resources in subscription
         resources = paginate(s, f"{ARM}/subscriptions/{sid}/resources?api-version={ARM_API}")
+        found["resources"] += len(resources)
         added["resources"] += data.add_many(data.resources, resources)
 
         # Role assignments (RBAC)
         assignments = paginate(s, f"{ARM}/subscriptions/{sid}/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&$filter=atScope()")
+        found["role_assignments"] += len(assignments)
         added["role_assignments"] += data.add_many(data.role_assignments, assignments)
 
-    return dict(added)
+    return dict(added), dict(found)
 
 
 # ---------------------------------------------------------------------------
@@ -491,19 +535,35 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
             t = Table(box=box.SIMPLE_HEAD, header_style="bold green",
                       border_style="bright_black",
                       title=f"[bold green]Successful Logins ({len(successes)})[/bold green]")
-            t.add_column("User",         style="bold green", no_wrap=True)
-            t.add_column("Clients",      style="white",      max_width=38)
-            t.add_column("Graph",        style="cyan",        justify="center")
-            t.add_column("Azure",        style="yellow",      justify="center")
+            t.add_column("User",              style="bold green", no_wrap=True)
+            t.add_column("Clients",           style="white",      max_width=30)
+            t.add_column("Graph",             style="cyan",       justify="center")
+            t.add_column("Azure",             style="yellow",     justify="center")
+            t.add_column("Azure Resources",   style="yellow",     justify="right")
+            t.add_column("Owns",              style="magenta")
+            t.add_column("Entra Roles",       style="red")
             t.add_column("Licensed Services", style="green")
             for user, info in sorted(successes.items()):
                 clients  = ", ".join(info["clients"])
                 services = info.get("services", {})
                 licensed = "  ".join(k for k, v in services.items() if v) or "—"
+
+                arm_counts = info.get("azure_resource_count", {})
+                arm_str = f"{arm_counts.get('resources', 0)} ({arm_counts.get('subscriptions', 0)} subs)" if arm_counts else "—"
+
+                owned = info.get("owned_objects", {})
+                owns_str = ", ".join(f"{len(v)} {k}" for k, v in sorted(owned.items()) if v) or "—"
+
+                roles = info.get("entra_roles", [])
+                roles_str = ", ".join(roles) if roles else "—"
+
                 t.add_row(
                     user, clients,
                     "[green]Y[/green]" if info.get("graph") else "[dim]n[/dim]",
                     "[green]Y[/green]" if info.get("azure") else "[dim]n[/dim]",
+                    arm_str,
+                    owns_str,
+                    roles_str,
                     licensed,
                 )
             con.print(t)
@@ -595,7 +655,13 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
     else:
         print("\n=== RESULTS ===")
         for u, info in sorted(successes.items()):
-            print(f"  SUCCESS: {u}  [{', '.join(info['clients'])}]")
+            owned = info.get("owned_objects", {})
+            arm   = info.get("azure_resource_count", {})
+            roles = info.get("entra_roles", [])
+            own_str  = ("  owns=" + ",".join(f"{len(v)}{k}" for k,v in sorted(owned.items()) if v)) if owned else ""
+            arm_str  = f"  azure_res={arm.get('resources',0)}({arm.get('subscriptions',0)} subs)" if arm else ""
+            role_str = f"  roles={';'.join(roles)}" if roles else ""
+            print(f"  SUCCESS: {u}  [{', '.join(info['clients'])}]{own_str}{arm_str}{role_str}")
         for u in sorted(unenrolled):
             print(f"  MFA NOT ENROLLED: {u}")
         for k, v in counts.items():
@@ -703,6 +769,17 @@ def main():
             total = sum(added.values())
             rprint(f"  [green]Graph:[/green] +{total} objects  ({', '.join(f'{v} {k}' for k,v in added.items() if v)})")
 
+            owned = enumerate_owned_objects(graph_tok)
+            successes[username]["owned_objects"] = owned
+            if owned:
+                parts = [f"{len(v)} {k}" for k, v in sorted(owned.items()) if v]
+                rprint(f"  [bold magenta]Owns:[/bold magenta]      [magenta]{', '.join(parts)}[/magenta]")
+
+            roles = enumerate_user_roles(graph_tok)
+            successes[username]["entra_roles"] = roles
+            if roles:
+                rprint(f"  [bold red]Roles:[/bold red]     [red]{', '.join(roles)}[/red]")
+
         # Azure token
         azure_tok = get_token_for_scope(
             args.tenant, username, password,
@@ -710,10 +787,12 @@ def main():
             "04b07795-8ddb-461a-bbee-02f9e1bf7b46",  # Azure CLI
         )
         if azure_tok:
-            added = enumerate_azure(azure_tok, tenant_data)
+            added, found = enumerate_azure(azure_tok, tenant_data)
             successes[username]["azure"] = True
+            successes[username]["azure_resource_count"] = found
             total = sum(added.values())
-            rprint(f"  [yellow]Azure:[/yellow] +{total} objects  ({', '.join(f'{v} {k}' for k,v in added.items() if v)})")
+            rprint(f"  [yellow]Azure:[/yellow] +{total} new objects  ({', '.join(f'{v} {k}' for k,v in added.items() if v)})")
+            rprint(f"  [yellow]Azure visible:[/yellow] {found.get('subscriptions', 0)} subs  {found.get('resources', 0)} resources")
 
     progress_cols = [
         SpinnerColumn(),
