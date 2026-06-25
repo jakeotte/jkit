@@ -712,7 +712,7 @@ def main():
             services = detect_services(graph_tok)
             successes[username]["services"] = services
             svc_str = "  ".join(k for k, v in services.items() if v) or "none"
-            rprint(f"  Licenses:  {svc_str}")
+            rprint(f"  Licenses:  [bright_white]{svc_str}[/bright_white]")
             added = enumerate_graph(graph_tok, tenant_data)
             successes[username]["graph"] = True
             total = sum(added.values())
@@ -739,7 +739,11 @@ def main():
             added, found = enumerate_azure(azure_tok, tenant_data)
             successes[username]["azure"] = True
             successes[username]["azure_resource_count"] = found
-            rprint(f"  Azure: {found.get('subscriptions', 0)} subs  {found.get('resources', 0)} resources")
+            subs = found.get('subscriptions', 0)
+            res  = found.get('resources', 0)
+            subs_str = f"[bright_white]{subs}[/bright_white]" if subs else str(subs)
+            res_str  = f"[bright_white]{res}[/bright_white]"  if res  else str(res)
+            rprint(f"  Azure: {subs_str} subs  {res_str} resources")
         rprint("")
 
     progress_cols = [
