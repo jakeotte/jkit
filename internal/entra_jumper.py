@@ -99,6 +99,21 @@ NOTFOUND_CODES      = {"AADSTS50034", "AADSTS50059"}
 SKIP_CODES          = {"AADSTS900144", "AADSTS700016", "AADSTS90014"}
 SYSTEM_PREFIXES     = ("SM_", "DiscoverySearchMailbox", "FederatedEmail", "SystemMailbox")
 
+COUNT_KEY_TO_FILE = {
+    "users":              "graph_users.json",
+    "groups":             "graph_groups.json",
+    "devices":            "graph_devices.json",
+    "service_principals": "graph_service_principals.json",
+    "applications":       "graph_applications.json",
+    "roles":              "graph_roles.json",
+    "cap_policies":       "graph_cap_policies.json",
+    "named_locations":    "graph_named_locations.json",
+    "mfa_details":        "graph_mfa_details.json",
+    "subscriptions":      "azure_subscriptions.json",
+    "resources":          "azure_resources.json",
+    "role_assignments":   "azure_role_assignments.json",
+}
+
 # Service plan name substrings -> friendly label
 SERVICE_PLAN_MAP = {
     "exchange":          "Outlook/Exchange",
@@ -576,20 +591,22 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
                         if k in ("subscriptions", "resources", "role_assignments") and v}
 
         if graph_counts or azure_counts:
+            file_names = {Path(f).name: f for f in files}
             rprint("\n[bold white]Enumeration[/bold white]")
             if graph_counts:
                 rprint("  [bold cyan]Graph / Entra[/bold cyan]")
                 for k, v in graph_counts.items():
-                    rprint(f"    [bright_black]{k.replace('_', ' ').title():<24}[/bright_black] {v}")
+                    fname = file_names.get(COUNT_KEY_TO_FILE.get(k, ""), "")
+                    fsuffix = f"  [dim]{fname}[/dim]" if fname else ""
+                    rprint(f"    [bright_black]{k.replace('_', ' ').title():<24}[/bright_black] {v}{fsuffix}")
+                if "graph_org.json" in file_names:
+                    rprint(f"    [bright_black]{'Org':<24}[/bright_black]   [dim]{file_names['graph_org.json']}[/dim]")
             if azure_counts:
                 rprint("  [bold yellow]Azure ARM[/bold yellow]")
                 for k, v in azure_counts.items():
-                    rprint(f"    [bright_black]{k.replace('_', ' ').title():<24}[/bright_black] {v}")
-
-        if files:
-            rprint("\n[bold white]Output[/bold white]")
-            for f in files:
-                rprint(f"  [dim]{f}[/dim]")
+                    fname = file_names.get(COUNT_KEY_TO_FILE.get(k, ""), "")
+                    fsuffix = f"  [dim]{fname}[/dim]" if fname else ""
+                    rprint(f"    [bright_black]{k.replace('_', ' ').title():<24}[/bright_black] {v}{fsuffix}")
 
     else:
         print("\n=== RESULTS ===")
