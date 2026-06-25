@@ -546,14 +546,14 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
         # Successful users table
         if successes:
             SVC_KEYS = ["Outlook/Exchange", "SharePoint", "OneDrive", "Teams"]
-            rprint(f"\n[bold green]Successful Logins ({len(successes)})[/bold green]")
-            t = Table(box=box.MINIMAL, header_style="bold green", show_edge=False)
-            t.add_column("User",     style="bold green", no_wrap=True)
-            t.add_column("Graph",    style="cyan",       justify="center")
-            t.add_column("Azure",    style="yellow",     justify="right")
-            t.add_column("Owns",     style="magenta")
-            t.add_column("Roles",    style="red")
-            t.add_column("Licenses", style="green")
+            rprint(f"\n[bold]Successful Logins ({len(successes)})[/bold]")
+            t = Table(box=box.MINIMAL, header_style="bold", show_edge=False)
+            t.add_column("User",     no_wrap=True)
+            t.add_column("Graph",    justify="center")
+            t.add_column("Azure",    justify="right")
+            t.add_column("Owns")
+            t.add_column("Roles")
+            t.add_column("Licenses")
             for user, info in sorted(successes.items()):
                 services = info.get("services", {})
                 licensed = "  ".join(k for k, v in services.items() if v) or "—"
@@ -569,8 +569,8 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
 
                 t.add_row(
                     user,
-                    "[green]Y[/green]" if info.get("graph") else "[dim]n[/dim]",
-                    arm_str if info.get("azure") else "[dim]n[/dim]",
+                    "Y" if info.get("graph") else "n",
+                    arm_str if info.get("azure") else "n",
                     owns_str,
                     roles_str,
                     licensed,
@@ -579,9 +579,9 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
 
         # MFA not enrolled
         if unenrolled:
-            rprint(f"\n[bold yellow]MFA Not Enrolled ({len(unenrolled)})[/bold yellow]")
+            rprint(f"\n[bold]MFA Not Enrolled ({len(unenrolled)})[/bold]")
             for u in sorted(unenrolled):
-                rprint(f"  [yellow]{u}[/yellow]")
+                rprint(f"  {u}")
 
 
         # Enumeration counts
@@ -592,21 +592,21 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
 
         if graph_counts or azure_counts:
             file_names = {Path(f).name: f for f in files}
-            rprint("\n[bold white]Enumeration[/bold white]")
+            rprint("\n[bold]Enumeration[/bold]")
             if graph_counts:
-                rprint("  [bold cyan]Graph / Entra[/bold cyan]")
+                rprint("  Graph / Entra")
                 for k, v in graph_counts.items():
                     fname = file_names.get(COUNT_KEY_TO_FILE.get(k, ""), "")
                     fsuffix = f"  [dim]{fname}[/dim]" if fname else ""
-                    rprint(f"    [bright_black]{k.replace('_', ' ').title():<24}[/bright_black] {v}{fsuffix}")
+                    rprint(f"    {k.replace('_', ' ').title():<24} {v}{fsuffix}")
                 if "graph_org.json" in file_names:
-                    rprint(f"    [bright_black]{'Org':<24}[/bright_black]   [dim]{file_names['graph_org.json']}[/dim]")
+                    rprint(f"    {'Org':<24}   [dim]{file_names['graph_org.json']}[/dim]")
             if azure_counts:
-                rprint("  [bold yellow]Azure ARM[/bold yellow]")
+                rprint("  Azure ARM")
                 for k, v in azure_counts.items():
                     fname = file_names.get(COUNT_KEY_TO_FILE.get(k, ""), "")
                     fsuffix = f"  [dim]{fname}[/dim]" if fname else ""
-                    rprint(f"    [bright_black]{k.replace('_', ' ').title():<24}[/bright_black] {v}{fsuffix}")
+                    rprint(f"    {k.replace('_', ' ').title():<24} {v}{fsuffix}")
 
     else:
         print("\n=== RESULTS ===")
@@ -668,7 +668,12 @@ def main():
     creds       = load_creds(args.creds, args.tenant)
     out_dir     = Path(args.out or f"entra-jump-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
 
-    rprint(f"[bold white]entra_jumper[/bold white]  [bright_black]{args.tenant}[/bright_black]  {len(creds)} creds  {args.clients} clients  {args.ua}  {args.workers}w/{args.delay}s")
+    rprint("[bold]entra_jumper[/bold]")
+    rprint(f"  Tenant:   {args.tenant}")
+    rprint(f"  Creds:    {len(creds)}")
+    rprint(f"  Clients:  {args.clients} ({len(client_keys)})")
+    rprint(f"  UA:       {args.ua}")
+    rprint(f"  Workers:  {args.workers}  Delay: {args.delay}s")
 
     work = [(u, pw, ck, ua)
             for (u, pw) in creds
@@ -707,22 +712,22 @@ def main():
             services = detect_services(graph_tok)
             successes[username]["services"] = services
             svc_str = "  ".join(k for k, v in services.items() if v) or "none"
-            rprint(f"  [bold]Licenses:[/bold]  [green]{svc_str}[/green]")
+            rprint(f"  Licenses:  {svc_str}")
             added = enumerate_graph(graph_tok, tenant_data)
             successes[username]["graph"] = True
             total = sum(added.values())
-            rprint(f"  [green]Graph:[/green] +{total} objects  ({', '.join(f'{v} {k}' for k,v in added.items() if v)})")
+            rprint(f"  Graph: +{total} objects  ({', '.join(f'{v} {k}' for k,v in added.items() if v)})")
 
             owned = enumerate_owned_objects(graph_tok)
             successes[username]["owned_objects"] = owned
             if owned:
                 parts = [f"{len(v)} {k}" for k, v in sorted(owned.items()) if v]
-                rprint(f"  [bold magenta]Owns:[/bold magenta]      [magenta]{', '.join(parts)}[/magenta]")
+                rprint(f"  Owns:      {', '.join(parts)}")
 
             roles = enumerate_user_roles(graph_tok)
             successes[username]["entra_roles"] = roles
             if roles:
-                rprint(f"  [bold red]Roles:[/bold red]     [red]{', '.join(roles)}[/red]")
+                rprint(f"  Roles:     {', '.join(roles)}")
 
         # Azure token
         azure_tok = get_token_for_scope(
@@ -734,7 +739,7 @@ def main():
             added, found = enumerate_azure(azure_tok, tenant_data)
             successes[username]["azure"] = True
             successes[username]["azure_resource_count"] = found
-            rprint(f"  [yellow]Azure:[/yellow] {found.get('subscriptions', 0)} subs  {found.get('resources', 0)} resources")
+            rprint(f"  Azure: {found.get('subscriptions', 0)} subs  {found.get('resources', 0)} resources")
 
     progress_cols = [
         SpinnerColumn(),
