@@ -700,7 +700,7 @@ def main():
         if username in enumerated or args.no_enumerate:
             return
         enumerated.add(username)
-        rprint(f"\n[bold cyan][*] {username}...[/bold cyan]")
+        rprint(f"  [bold cyan][*] {username}...[/bold cyan]")
 
         # Graph token
         graph_tok = get_token_for_scope(
@@ -740,6 +740,7 @@ def main():
             successes[username]["azure"] = True
             successes[username]["azure_resource_count"] = found
             rprint(f"  Azure: {found.get('subscriptions', 0)} subs  {found.get('resources', 0)} resources")
+        rprint("")
 
     progress_cols = [
         SpinnerColumn(),
