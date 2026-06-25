@@ -27,7 +27,7 @@ git submodule update --init --recursive
 | `comrecon.py` | COM hijack target + scheduled task recon via SMB C$ |
 | `taskhijacker.py` | Hijack writable scheduled tasks via TSCH RPC, auto-restore |
 | `find_entra_joined.py` | Enumerate hybrid/Entra-joined devices via LDAP cert parsing |
-| `entra_jumper.py` | Probe Entra CA gaps via ROPC; enumerate Graph + ARM on success |
+| `entra_jumper.py` | Probe Entra CA gaps via ROPC; enumerate Graph + ARM on success. Defaults: 5 workers, 0.5s delay |
 | [klist2ccache](internal/klist2ccache) | Windows `klist` → MIT ccache; remote TGT dump via Task Scheduler + SMB |
 | [smbthief](internal/smbthief) | SMB share enumeration |
 | [RustHound-CE](internal/RustHound-CE) | BloodHound LDAP collection with OPSEC obfuscation mode |

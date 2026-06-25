@@ -532,9 +532,8 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
         # Successful users table
         if successes:
             SVC_KEYS = ["Outlook/Exchange", "SharePoint", "OneDrive", "Teams"]
-            t = Table(box=box.SIMPLE_HEAD, header_style="bold green",
-                      border_style="bright_black",
-                      title=f"[bold green]Successful Logins ({len(successes)})[/bold green]")
+            rprint(f"\n[bold green]Successful Logins ({len(successes)})[/bold green]")
+            t = Table(box=box.MINIMAL, header_style="bold green", show_edge=False)
             t.add_column("User",              style="bold green", no_wrap=True)
             t.add_column("Clients",           style="white",      max_width=30)
             t.add_column("Graph",             style="cyan",       justify="center")
@@ -570,26 +569,10 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
 
         # MFA not enrolled
         if unenrolled:
-            t = Table(box=box.SIMPLE_HEAD, header_style="bold yellow",
-                      border_style="bright_black",
-                      title=f"[bold yellow]MFA Not Enrolled ({len(unenrolled)})[/bold yellow]")
-            t.add_column("User",     style="yellow")
-            t.add_column("Next step", style="dim")
+            rprint(f"\n[bold yellow]MFA Not Enrolled ({len(unenrolled)})[/bold yellow]")
             for u in sorted(unenrolled):
-                t.add_row(u, "register MFA at aka.ms/mfasetup")
-            con.print(t)
+                rprint(f"  [yellow]{u}[/yellow]")
 
-        # Valid creds blocked by MFA
-        blocked = mfa_required - unenrolled
-        if blocked:
-            t = Table(box=box.SIMPLE_HEAD, header_style="bold cyan",
-                      border_style="bright_black",
-                      title=f"Valid Creds — MFA Blocking ({len(blocked)})")
-            t.add_column("User",      style="cyan")
-            t.add_column("Next step", style="dim")
-            for u in sorted(blocked):
-                t.add_row(u, "device code / PRT / token theft")
-            con.print(t)
 
         # Enumeration counts
         graph_counts = {k: v for k, v in counts.items()
@@ -598,59 +581,20 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
                         if k in ("subscriptions", "resources", "role_assignments") and v}
 
         if graph_counts or azure_counts:
-            g = Table.grid(padding=(0, 4))
-            g.add_column(style="bright_black")
-            g.add_column(justify="right", style="bold white")
-
+            rprint("\n[bold white]Enumeration[/bold white]")
             if graph_counts:
-                g.add_row("[bold cyan]-- Graph / Entra --[/bold cyan]", "")
+                rprint("  [bold cyan]Graph / Entra[/bold cyan]")
                 for k, v in graph_counts.items():
-                    g.add_row(k.replace("_", " ").title(), str(v))
+                    rprint(f"    [bright_black]{k.replace('_', ' ').title():<24}[/bright_black] {v}")
             if azure_counts:
-                g.add_row("[bold yellow]-- Azure ARM --[/bold yellow]", "")
+                rprint("  [bold yellow]Azure ARM[/bold yellow]")
                 for k, v in azure_counts.items():
-                    g.add_row(k.replace("_", " ").title(), str(v))
+                    rprint(f"    [bright_black]{k.replace('_', ' ').title():<24}[/bright_black] {v}")
 
-            con.print(Panel(g, title="[bold white]Enumeration Results[/bold white]",
-                            border_style="bright_black", expand=False))
-
-        # CAP-readable roles
-        CAP_ROLES = {
-            "Global Administrator", "Security Administrator",
-            "Security Reader", "Conditional Access Administrator",
-            "Global Reader", "Privileged Role Administrator",
-        }
-        cap_rows = []
-        for role in data.roles.values():
-            if role.get("displayName") not in CAP_ROLES:
-                continue
-            for m in role.get("_members", []):
-                upn = m.get("userPrincipalName", "")
-                if upn:
-                    cap_rows.append((role["displayName"], upn))
-
-        if cap_rows:
-            t = Table(box=box.SIMPLE_HEAD, header_style="bold magenta",
-                      border_style="bright_black",
-                      title="Users with CAP Read Access")
-            t.add_column("Role", style="magenta",  no_wrap=True)
-            t.add_column("UPN",  style="white")
-            seen = set()
-            for role_name, upn in sorted(cap_rows):
-                key = (role_name, upn)
-                if key not in seen:
-                    seen.add(key)
-                    t.add_row(role_name, upn)
-            con.print(t)
-
-        # Output files
         if files:
-            t = Table(box=box.SIMPLE_HEAD, header_style="bold white",
-                      border_style="bright_black", title="Output Files")
-            t.add_column("File", style="dim")
+            rprint("\n[bold white]Output[/bold white]")
             for f in files:
-                t.add_row(f)
-            con.print(t)
+                rprint(f"  [dim]{f}[/dim]")
 
     else:
         print("\n=== RESULTS ===")
@@ -701,8 +645,8 @@ def main():
     p.add_argument("--clients",       default="all", choices=list(PRESET_GROUPS.keys()))
     p.add_argument("--ua",            default="chrome_win",
                    choices=list(USER_AGENTS.keys()) + ["all"])
-    p.add_argument("--workers",       type=int,   default=3)
-    p.add_argument("--delay",         type=float, default=1.0)
+    p.add_argument("--workers",       type=int,   default=5)
+    p.add_argument("--delay",         type=float, default=0.5)
     p.add_argument("--out",           default="", help="Output directory (default: entra-jump-<ts>)")
     p.add_argument("--no-enumerate",  action="store_true", help="Skip enumeration, probe only")
     args = p.parse_args()
@@ -712,19 +656,7 @@ def main():
     creds       = load_creds(args.creds, args.tenant)
     out_dir     = Path(args.out or f"entra-jump-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
 
-    if RICH:
-        info = Table.grid(padding=(0, 2))
-        info.add_column(style="bold cyan")
-        info.add_column()
-        info.add_row("Tenant",  args.tenant)
-        info.add_row("Creds",   str(len(creds)))
-        info.add_row("Clients", f"{args.clients} ({len(client_keys)})")
-        info.add_row("UA",      f"{args.ua} ({len(ua_keys)})")
-        info.add_row("Workers", f"{args.workers}  Delay: {args.delay}s")
-        con.print(Panel(info, title="[bold white]entra_jumper[/bold white]",
-                        border_style="bright_black", expand=False))
-    else:
-        print(f"[*] Tenant: {args.tenant}  Creds: {len(creds)}  Workers: {args.workers}")
+    rprint(f"[bold white]entra_jumper[/bold white]  [bright_black]{args.tenant}[/bright_black]  {len(creds)} creds  {args.clients} clients  {args.ua}  {args.workers}w/{args.delay}s")
 
     work = [(u, pw, ck, ua)
             for (u, pw) in creds
