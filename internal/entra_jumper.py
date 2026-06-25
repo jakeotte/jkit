@@ -534,21 +534,18 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
             SVC_KEYS = ["Outlook/Exchange", "SharePoint", "OneDrive", "Teams"]
             rprint(f"\n[bold green]Successful Logins ({len(successes)})[/bold green]")
             t = Table(box=box.MINIMAL, header_style="bold green", show_edge=False)
-            t.add_column("User",              style="bold green", no_wrap=True)
-            t.add_column("Clients",           style="white",      max_width=30)
-            t.add_column("Graph",             style="cyan",       justify="center")
-            t.add_column("Azure",             style="yellow",     justify="center")
-            t.add_column("Azure Resources",   style="yellow",     justify="right")
-            t.add_column("Owns",              style="magenta")
-            t.add_column("Entra Roles",       style="red")
-            t.add_column("Licensed Services", style="green")
+            t.add_column("User",     style="bold green", no_wrap=True)
+            t.add_column("Graph",    style="cyan",       justify="center")
+            t.add_column("Azure",    style="yellow",     justify="right")
+            t.add_column("Owns",     style="magenta")
+            t.add_column("Roles",    style="red")
+            t.add_column("Licenses", style="green")
             for user, info in sorted(successes.items()):
-                clients  = ", ".join(info["clients"])
                 services = info.get("services", {})
                 licensed = "  ".join(k for k, v in services.items() if v) or "—"
 
                 arm_counts = info.get("azure_resource_count", {})
-                arm_str = f"{arm_counts.get('resources', 0)} ({arm_counts.get('subscriptions', 0)} subs)" if arm_counts else "—"
+                arm_str = f"{arm_counts.get('resources', 0)} res ({arm_counts.get('subscriptions', 0)} subs)" if arm_counts else "—"
 
                 owned = info.get("owned_objects", {})
                 owns_str = ", ".join(f"{len(v)} {k}" for k, v in sorted(owned.items()) if v) or "—"
@@ -557,10 +554,9 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
                 roles_str = ", ".join(roles) if roles else "—"
 
                 t.add_row(
-                    user, clients,
+                    user,
                     "[green]Y[/green]" if info.get("graph") else "[dim]n[/dim]",
-                    "[green]Y[/green]" if info.get("azure") else "[dim]n[/dim]",
-                    arm_str,
+                    arm_str if info.get("azure") else "[dim]n[/dim]",
                     owns_str,
                     roles_str,
                     licensed,
@@ -605,7 +601,7 @@ def print_summary(successes: dict, unenrolled: set, mfa_required: set,
             own_str  = ("  owns=" + ",".join(f"{len(v)}{k}" for k,v in sorted(owned.items()) if v)) if owned else ""
             arm_str  = f"  azure_res={arm.get('resources',0)}({arm.get('subscriptions',0)} subs)" if arm else ""
             role_str = f"  roles={';'.join(roles)}" if roles else ""
-            print(f"  SUCCESS: {u}  [{', '.join(info['clients'])}]{own_str}{arm_str}{role_str}")
+            print(f"  SUCCESS: {u}{own_str}{arm_str}{role_str}")
         for u in sorted(unenrolled):
             print(f"  MFA NOT ENROLLED: {u}")
         for k, v in counts.items():
@@ -683,7 +679,7 @@ def main():
         if username in enumerated or args.no_enumerate:
             return
         enumerated.add(username)
-        rprint(f"\n  [bold cyan]Enumerating as {username}...[/bold cyan]")
+        rprint(f"\n[bold cyan][*] {username}...[/bold cyan]")
 
         # Graph token
         graph_tok = get_token_for_scope(
@@ -695,7 +691,7 @@ def main():
             services = detect_services(graph_tok)
             successes[username]["services"] = services
             svc_str = "  ".join(k for k, v in services.items() if v) or "none"
-            rprint(f"  [bold]Services:[/bold]  [green]{svc_str}[/green]")
+            rprint(f"  [bold]Licenses:[/bold]  [green]{svc_str}[/green]")
             added = enumerate_graph(graph_tok, tenant_data)
             successes[username]["graph"] = True
             total = sum(added.values())
@@ -722,9 +718,7 @@ def main():
             added, found = enumerate_azure(azure_tok, tenant_data)
             successes[username]["azure"] = True
             successes[username]["azure_resource_count"] = found
-            total = sum(added.values())
-            rprint(f"  [yellow]Azure:[/yellow] +{total} new objects  ({', '.join(f'{v} {k}' for k,v in added.items() if v)})")
-            rprint(f"  [yellow]Azure visible:[/yellow] {found.get('subscriptions', 0)} subs  {found.get('resources', 0)} resources")
+            rprint(f"  [yellow]Azure:[/yellow] {found.get('subscriptions', 0)} subs  {found.get('resources', 0)} resources")
 
     progress_cols = [
         SpinnerColumn(),
@@ -757,14 +751,12 @@ def main():
                 ua = result.user_agent_key
 
                 if result.status == "SUCCESS":
-                    style, label = STATUS_STYLE["SUCCESS"]
-                    rprint(f"[{style}]{label}[/{style}] [white]{u:<42}[/white] [bright_black]{ck:<16}[/bright_black] [dim]{ua}[/dim]")
                     if u not in successes:
-                        successes[u] = {"clients": [], "graph": False, "azure": False, "password": future_creds[future][1]}
-                    successes[u]["clients"].append(result.client_label)
-                    # Enumerate once per unique user
-                    pw = future_creds[future][1]
-                    do_enumerate(u, pw)
+                        successes[u] = {"graph": False, "azure": False, "password": future_creds[future][1]}
+                        style, label = STATUS_STYLE["SUCCESS"]
+                        rprint(f"[{style}]{label}[/{style}] [white]{u:<42}[/white] [bright_black]CLIENT: {ck:<16}[/bright_black] [dim]UA: {ua}[/dim]")
+                        pw = future_creds[future][1]
+                        do_enumerate(u, pw)
 
                 elif result.status == "MFA_NOT_ENROLLED":
                     if u not in mfa_users:
