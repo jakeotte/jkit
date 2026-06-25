@@ -67,14 +67,13 @@ CLIENT_PROFILES = {
     "onedrive":       ("OneDrive",            "ab9b8c07-8f02-4f72-87fa-80105867a763", "https://graph.microsoft.com/.default"),
     "broker":         ("Auth Broker",         "29d9ed98-a469-4536-ade2-f981bc1d605e", "https://graph.microsoft.com/.default"),
     "o365_mgmt":      ("O365 Management",     "00b41c95-dab0-4487-9791-b9d2c32c80f2", "https://manage.office.com/.default"),
-    "graph_explorer": ("Graph Explorer",      "de8bc8b5-d9f9-48b1-a8ad-b748da725064", "https://graph.microsoft.com/.default"),
     "intune":         ("Intune Enrollment",   "9ba1a5c7-f17a-4de9-a1f1-6178c8d51223", "https://graph.microsoft.com/.default"),
 }
 
 PRESET_GROUPS = {
     "all":    list(CLIENT_PROFILES.keys()),
     "legacy": ["ews_legacy", "activesync", "outlook_mobile"],
-    "graph":  ["az_powershell", "office", "teams", "graph_explorer"],
+    "graph":  ["az_powershell", "office", "teams"],
     "mgmt":   ["az_powershell", "az_cli", "o365_mgmt"],
 }
 
